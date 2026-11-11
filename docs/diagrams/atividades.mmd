@@ -1,0 +1,52 @@
+flowchart TB
+    subgraph RU["Raia 1 · Usuário (Exportador)"]
+        direction TB
+        U0((Início)) --> U1[Solicitar checklist de exportação]
+        U2[Informar dados faltantes]
+        U3[Visualizar checklist, roteiro e próximos passos]
+        U4[Marcar itens concluídos]
+        UF((Fim))
+    end
+
+    subgraph RB["Raia 2 · Sistema Back-End"]
+        direction TB
+        B1[Recuperar contexto da sessão]
+        B2{Dados mínimos completos?}
+        B3[Solicitar apenas dados faltantes]
+        B4[Registrar checklist com status SOLICITADO]
+        FORK@{ shape: fork, label: "Fork" }
+        B5[Consultar requisitos e restrições do destino]
+        B6[Consultar documentos exigidos e emissores]
+        JOIN@{ shape: join, label: "Join" }
+        B7{Fontes obtidas com sucesso?}
+        B8[Registrar status FALHA e permitir reprocesso]
+        B9[Consolidar itens e registrar status GERADO]
+        B10[Publicar ChecklistGeradoEvent]
+        B11[Gerar roteiro sequencial e resumo de próximos passos]
+        B12[Registrar status EM_EXECUCAO]
+        B13[Atualizar item e calcular progresso]
+        B14{Todos os itens obrigatórios concluídos?}
+        B15[Registrar status CONCLUIDO e gerar relatório]
+    end
+
+    subgraph RE["Raia 3 · Serviços Externos e IA"]
+        direction TB
+        E1[Validar NCM no Siscomex]
+        E2[Redigir itens em linguagem natural com citação de fonte]
+    end
+
+    U1 --> B1 --> B2
+    B2 -->|"[dadosCompletos = false]"| B3 --> U2 --> B1
+    B2 -->|"[dadosCompletos = true]"| B4 --> FORK
+    FORK --> B5
+    FORK --> B6
+    FORK --> E1
+    B5 --> JOIN
+    B6 --> JOIN
+    E1 --> JOIN
+    JOIN --> B7
+    B7 -->|"[fontesOk = false]"| B8 --> UF
+    B7 -->|"[fontesOk = true]"| E2 --> B9 --> B10 --> B11 --> U3
+    U3 --> B12 --> U4 --> B13 --> B14
+    B14 -->|"[obrigatoriosPendentes > 0]"| U4
+    B14 -->|"[obrigatoriosPendentes = 0]"| B15 --> UF

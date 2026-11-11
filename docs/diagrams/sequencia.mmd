@@ -1,0 +1,86 @@
+sequenceDiagram
+    autonumber
+    actor U as Usuário (Exportador)
+    participant UI as WebApp (React)
+    participant API as ChecklistController
+    participant CTX as ContextoService
+    participant CS as ChecklistService
+    participant DB as ChecklistRepository
+    participant SIS as SiscomexClient
+    participant RS as RegraAduaneiraService
+    participant IA as AssistenteIAService
+    participant MQ as BarramentoEventos
+    participant WK as RoteiroWorker
+
+    %% ===== Geração do checklist (RF14) =====
+    U->>UI: informar produto, NCM e destino
+    UI->>API: gerarChecklist(GerarChecklistRequest)
+    API->>CTX: obterContexto(sessaoId)
+    CTX-->>API: ContextoDTO
+    API->>CS: gerarChecklist(GerarChecklistRequest, ContextoDTO)
+
+    alt dados mínimos incompletos
+        CS-->>API: DadosPendentesDTO
+        API-->>UI: 422 DadosPendentesDTO
+        UI-->>U: pergunta apenas o que falta (RF03)
+    else dados completos
+        CS->>DB: salvar(Checklist com status SOLICITADO)
+        DB-->>CS: ChecklistId
+        CS->>SIS: validarNcm(ncm)
+        SIS-->>CS: NcmDTO
+        CS->>RS: consultarRequisitos(ncm, paisDestino)
+        RS-->>CS: RequisitosDTO
+
+        alt fonte normativa indisponível (timeout)
+            CS->>DB: atualizarStatus(checklistId, FALHA)
+            DB-->>CS: ok
+            CS-->>API: ErroDTO
+            API-->>UI: 503 ErroDTO
+            UI-->>U: informa falha e oferece reprocessar
+        else requisitos obtidos
+            loop para cada requisito ou documento de RequisitosDTO
+                CS->>IA: redigirItem(RequisitoDTO)
+                IA-->>CS: ItemChecklistDTO
+            end
+            CS->>DB: salvarItens(checklistId, listaItens)
+            DB-->>CS: ok
+            CS->>DB: atualizarStatus(checklistId, GERADO)
+            DB-->>CS: ok
+            CS-)MQ: publicar(ChecklistGeradoEvent)
+            CS-->>API: ChecklistDTO
+            API-->>UI: 201 ChecklistDTO
+            UI-->>U: exibe checklist
+        end
+    end
+
+    %% ===== Processamento assíncrono: roteiro e próximos passos (RF13, RF15) =====
+    MQ-)WK: aoReceberEvento(ChecklistGeradoEvent)
+    WK->>CS: gerarRoteiro(checklistId)
+    CS-->>WK: RoteiroDTO
+    WK->>CS: gerarResumoProximosPassos(checklistId)
+    CS-->>WK: ResumoDTO
+
+    %% ===== Acompanhamento da execução =====
+    U->>UI: iniciar execução do roteiro
+    UI->>API: iniciarExecucao(checklistId)
+    API->>CS: iniciarExecucao(checklistId)
+    CS-->>API: ChecklistDTO
+    API-->>UI: 200 ChecklistDTO
+
+    U->>UI: marcar item como concluído
+    UI->>API: marcarItem(MarcarItemRequest)
+    API->>CS: marcarItem(MarcarItemRequest)
+    CS->>DB: buscarPorId(checklistId)
+    DB-->>CS: Checklist
+
+    alt status diferente de EM_EXECUCAO
+        CS-->>API: ErroDTO (transição inválida)
+        API-->>UI: 409 ErroDTO
+    else status EM_EXECUCAO
+        CS->>DB: atualizarItem(checklistId, itemId, concluido)
+        DB-->>CS: ok
+        CS-)MQ: publicar(EtapaConcluidaEvent)
+        CS-->>API: ProgressoDTO
+        API-->>UI: 200 ProgressoDTO
+        UI-->>U: atualiza barra de progresso
+    end

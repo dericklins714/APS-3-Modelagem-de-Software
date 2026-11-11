@@ -1,0 +1,39 @@
+stateDiagram-v2
+    direction TB
+    [*] --> Solicitado : solicitarChecklist [dadosMinimosCompletos] / registrarChecklist()
+    [*] --> DadosPendentes : solicitarChecklist [dadosMinimosIncompletos] / pedirDadosFaltantes()
+
+    DadosPendentes --> Solicitado : informarDados [dadosMinimosCompletos] / atualizarContexto()
+    DadosPendentes --> Cancelado : cancelar / descartarRascunho()
+
+    Solicitado --> Gerando : iniciarGeracao [regrasDisponiveis] / consultarFontes()
+    Solicitado --> Cancelado : cancelar / descartarRascunho()
+
+    Gerando --> Gerado : concluirGeracao [totalItens > 0] / publicarChecklistGeradoEvent()
+    Gerando --> Falha : erroGeracao [tentativas >= 3] / registrarFalha()
+
+    Falha --> Gerando : reprocessar [usuarioSolicitou] / reiniciarTentativas()
+    Falha --> Cancelado : cancelar / registrarMotivo()
+
+    Gerado --> EmExecucao : iniciarExecucao [roteiroGerado] / criarProgresso()
+    Gerado --> Cancelado : cancelar / registrarMotivo()
+
+    state EmExecucao {
+        [*] --> Preparacao
+        Preparacao --> Documentacao : concluirEtapa [obrigatoriosDaEtapaMarcados] / liberarProximaEtapa()
+        Documentacao --> Despacho : concluirEtapa [obrigatoriosDaEtapaMarcados] / liberarProximaEtapa()
+    }
+
+    EmExecucao --> Concluido : concluirDespacho [obrigatoriosPendentes = 0] / emitirRelatorio()
+    EmExecucao --> Cancelado : cancelar / registrarMotivo()
+
+    Concluido --> [*]
+    Cancelado --> [*]
+
+    Gerando : entry / registrarInicio()
+    Gerando : do / redigirItensComIA()
+    Gerando : exit / registrarFim()
+    Falha : entry / notificarUsuario()
+    Preparacao : entry / exibirItensDaEtapa()
+    Preparacao : exit / validarObrigatorios()
+    Concluido : entry / bloquearEdicao()
